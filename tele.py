@@ -57,18 +57,10 @@ class Bot(TeleBot):
             self.paperclip_on, self.desconocido_counter = False, 0
             self.start_time = time()
 
-    def save_config(self):
-        with open(self.abs_file_config, 'w') as config_file:
-            self.config.write(config_file)
-
     def load_config(self):
         c = self.config.read(self.abs_file_config)
-        convert_values_to_int = lambda dict_: dict(
-            zip(
-                dict_.keys(),
-                map(int, dict_.values()))
-            )
         if len(c) > 0:
+            convert_values_to_int = lambda dict_: dict(zip(dict_.keys(), map(int, dict_.values()))) # Converts all values of a dictionary to type int
             self.users = convert_values_to_int(self.config['USERS'])
             self.high = convert_values_to_int(self.config['HIGH']) # High privilege users
             self.aliases = self.config['ALIASES']
@@ -77,17 +69,25 @@ class Bot(TeleBot):
             if e.lower().strip() == 'y':
                 self.create_config_file()
             exit(1)
-    
-    @property
-    def default_user(self):
-        default_user = get_section_without_defaults(self.config, 'DEFAULT_USER')
-        if len(default_user) > 1:
-            print('error at line 84, section DEFAULT_USER can only contain one value')
-            exit(1)
-        return int(list(default_user.values())[0])
 
+    def save_config(self):
+        with open(self.abs_file_config, 'w') as config_file:
+            self.config.write(config_file)
+    
     def create_config_file(self):
         raise Exception('Not implemented!')
+
+    @property
+    def default_user(self):
+        try:
+            default_user = self.config['DEFAULT_USER']
+        except KeyError as e:
+            e.args = ('There is no section DEFAULT_USER in the config file. Create one and try again.',)
+            e.add_note('More info at README.md')
+            raise e
+        if len(default_user) > 1:            
+            raise Exception('Section DEFAULT_USER can only contain one value')
+        return int(list(default_user.values())[0])
 
     @property
     def online_time(self):
@@ -188,13 +188,17 @@ def send_message(bot, id, message):
     return 1
 
 def match_user_by_first_letter(bot, to_match) -> tuple[int, str]:
-    sitarts_with_that = lambda x: to_match.lower().startswith('/{} '.format(x.lower()))
-    if any(map(sitarts_with_that, bot.config['ALIASES'].keys())):
+    starts_with_that = lambda x: to_match.lower().startswith('/{} '.format(x.lower()))
+    in_aliases = any(map(starts_with_that, bot.config['ALIASES'].keys()))
+    in_users = any(map(starts_with_that, bot.config['USERS'].keys()))
+    if in_aliases or in_users:
         thing = to_match.split()
-        alias, to_match = thing[0], ' '.join(thing[1:])
-        return int(bot.config['USERS'][bot.config['ALIASES'][alias.strip('/ ')]]), to_match
+        initial, to_match = thing[0], ' '.join(thing[1:])
+        return int(bot.config['USERS'][initial.strip('/ ') if in_users else bot.config['ALIASES'][initial.strip('/ ')]]), to_match
     else:
-        return int(bot.config['USERS'][bot.config['ALIASES'][to_match.strip('/ ')]]) if to_match.strip('/ ') in bot.config['ALIASES'].keys() else 0, ''
+        in_aliases = to_match.strip('/ ') in bot.config['ALIASES'].keys()
+        in_users = to_match.strip('/ ') in bot.config['USERS'].keys()
+        return int(bot.config['USERS'][to_match.strip('/ ')]) if in_users else (int(bot.config['USERS'][bot.config['ALIASES'][to_match.strip('/ ')]]) if in_aliases else 0), ''
 
 def main():
     if len(argv) == 1:
@@ -218,18 +222,10 @@ def main():
                     bot.save_config()
                     print_and_save(respuesta, bot.abs_file_backup, print_message=False)
                     break
-                # Cambiar de usuario
-                elif entrada.strip() in list(bot.users.keys())+['/'+key for key in bot.users.keys()]:
-                    print('Usuario detectado')
-                    id = bot.users[entrada.strip('/ ')]
-                    continue
-                elif entrada.strip() in [str(value) for value in bot.users.values()]+['/'+str(value) for value in bot.users.values()]:
-                    print('Usuario detectado')
-                    id = int(entrada.strip('/'))
-                    continue
                 
                 # Verificar si se desea cambiar de usuario
                 elif (int_str:=match_user_by_first_letter(bot, entrada))[0]:
+                    print('Usuario detectado!')
                     id, entrada = int_str
 
                 elif entrada in ['/file', 'file', '/archivo', 'archivo']:
