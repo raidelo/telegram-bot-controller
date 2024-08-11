@@ -42,7 +42,7 @@ class Bot(TeleBot):
     def __init__(self, fast_init:bool=False):
         self.config = ConfigParser()
         self.load_config()
-        super().__init__(self.config['BOT']['apikey'])
+        super().__init__(self.apikey)
         if not fast_init: # Only meant for extended use of the bot.
             self.__next_message_is_cmd = False
             self.users_ = {value:key for key, value in zip(self.users.keys(), self.users.values())}
@@ -53,24 +53,48 @@ class Bot(TeleBot):
                 BotCommand('pc_control', 'Algunos controles del PC.'),
                 BotCommand('internet', 'Herramientas de internet.'),
                 BotCommand('help', 'Información sobre como usar el bot.')])
-
             self.paperclip_on, self.desconocido_counter = False, 0
             self.start_time = time()
 
-    def load_config(self):
+    def load_config(self) -> None:
         c = self.config.read(self.abs_file_config)
         if len(c) > 0:
             convert_values_to_int = lambda dict_: dict(zip(dict_.keys(), map(int, dict_.values()))) # Converts all values of a dictionary to type int
-            self.users = convert_values_to_int(self.config['USERS'])
-            self.high = convert_values_to_int(self.config['HIGH']) # High privilege users
-            self.aliases = self.config['ALIASES']
+            ################# GET USERS ################
+            try:
+                self.users = convert_values_to_int(self.config['USERS'])
+            except KeyError:
+                self.users = {}
+            ########## GET HIGH PRIVILEGE USER #########
+            try:
+                self.high = convert_values_to_int(self.config['HIGH'])
+            except KeyError:
+                self.high = {}
+            ################ GET ALIASES ###############    
+            try:
+                self.aliases = self.config['ALIASES']
+            except KeyError:
+                self.aliases = {}
+            try:
+            ################ GET BOT API ###############
+                self.apikey = self.config['BOT']['apikey']
+            ############# GET DEFAULT USER #############
+                default_user = self.config['DEFAULT_USER']
+                if len(default_user) > 1:            
+                    raise Exception('Section DEFAULT_USER can only contain one value')
+                self.default_user = int(list(default_user.values())[0])
+            except KeyError as e:
+                e.args = ('There is no section {} in the config file. Create one and try again.'.format(e.args[0]),)
+                e.add_note('More info at README.md')
+                raise e
+            ############################################
         else:
             e = input('El archivo de configuración no existe! Desea crear uno? (Y/N) ')
             if e.lower().strip() == 'y':
                 self.create_config_file()
             exit(1)
 
-    def save_config(self):
+    def save_config(self) -> None:
         with open(self.abs_file_config, 'w') as config_file:
             self.config.write(config_file)
     
@@ -78,22 +102,10 @@ class Bot(TeleBot):
         raise Exception('Not implemented!')
 
     @property
-    def default_user(self):
-        try:
-            default_user = self.config['DEFAULT_USER']
-        except KeyError as e:
-            e.args = ('There is no section DEFAULT_USER in the config file. Create one and try again.',)
-            e.add_note('More info at README.md')
-            raise e
-        if len(default_user) > 1:            
-            raise Exception('Section DEFAULT_USER can only contain one value')
-        return int(list(default_user.values())[0])
-
-    @property
-    def online_time(self):
+    def online_time(self) -> float:
         return time()-self.start_time
 
-    def __text_message(self, message):
+    def __text_message(self, message) -> None:
         # SECCIÓN DE MENSAJE ENTRANTE
         if message.chat.id in self.users_.keys():  # Si es un usuario conocido, obtener su nombre.
             name_of_user = self.users_[message.chat.id]
@@ -119,7 +131,7 @@ class Bot(TeleBot):
         elif message.text == '/quit':
             respuesta = 'Apagando el bot...'
             print_and_save(respuesta, self.abs_file_backup, reset_input=False)
-            self.save_users()
+            self.save_config()
             kill(getpid(), SIGTERM)
             return 0
         elif message.text in ['/pc_control', '/internet']:
@@ -173,7 +185,7 @@ def listener_thread(bot):
     except Exception as e:
         print(e)
 
-def send_message(bot, id, message):
+def send_message(bot, id, message) -> int:
     try:
         print_and_save(message, bot.abs_file_backup, print_message=False)
         bot.send_message(id, message)
@@ -193,14 +205,20 @@ def match_user_by_first_letter(bot, to_match) -> tuple[int, str]:
     in_users = any(map(starts_with_that, bot.config['USERS'].keys()))
     if in_aliases or in_users:
         thing = to_match.split()
-        initial, to_match = thing[0], ' '.join(thing[1:])
-        return int(bot.config['USERS'][initial.strip('/ ') if in_users else bot.config['ALIASES'][initial.strip('/ ')]]), to_match
+        initial, texto = thing[0], ' '.join(thing[1:])
+        section = 'USERS' if in_users else 'ALIASES'
+        return int(bot.config[section][initial.strip('/ ')]), texto
     else:
         in_aliases = to_match.strip('/ ') in bot.config['ALIASES'].keys()
         in_users = to_match.strip('/ ') in bot.config['USERS'].keys()
-        return int(bot.config['USERS'][to_match.strip('/ ')]) if in_users else (int(bot.config['USERS'][bot.config['ALIASES'][to_match.strip('/ ')]]) if in_aliases else 0), ''
+        if in_users:
+            return int(bot.config['USERS'][to_match.strip('/ ')]), ''
+        elif in_aliases:
+            return int(bot.config['USERS'][bot.config['ALIASES'][to_match.strip('/ ')]]), ''
+        else:
+            return 0, ''
 
-def main():
+def main() -> int:
     if len(argv) == 1:
         try:
             bot = Bot()
@@ -217,18 +235,16 @@ def main():
                     last_id = id
                 entrada = input('-> ')
                 # Cerrar el bot
-                if entrada.strip(' -/.') in ['quit', 'q', 'exit']:
+                if entrada in ['/quit', '/q', 'q', '/exit']:
                     respuesta = 'Apagando el bot...'
                     bot.save_config()
                     print_and_save(respuesta, bot.abs_file_backup, print_message=False)
                     break
-                
                 # Verificar si se desea cambiar de usuario
                 elif (int_str:=match_user_by_first_letter(bot, entrada))[0]:
-                    print('Usuario detectado!')
                     id, entrada = int_str
-
-                elif entrada in ['/file', 'file', '/archivo', 'archivo']:
+                # Enviar el contenido de un archivo
+                elif entrada in ['/file', '/archivo']:
                     entrada = input('Ingrese la ruta del archivo: ')
                     if entrada == '':
                         print('Continuando...')
@@ -239,15 +255,18 @@ def main():
                         except FileNotFoundError:
                             print('Archivo no encontrado')
                             continue
+                # Mostrar por consola el tiempo que el bot lleva activo
                 elif entrada in ['/status', 'status', '/estado', 'estado']:
                     print('El bot lleva activo %d segundos'%round(bot.online_time))
                     continue
-                elif entrada in ['/listausuarios', 'listausuarios', '/usuarios', 'usuarios', '/lista_usuarios','lista_usuarios']:
+                # Mostrar por consola la lista de todos los usuarios registrados
+                elif entrada in ['/listausuarios', '/usuarios', '/lista_usuarios']:
                     for key, value in zip(bot.users.keys(), bot.users.values()):
                         print('%s: %d'%(key,value))
                     continue
-                elif entrada in ['/clipboard', 'clipboard', '/portapapeles', 'portapapeles', '/cp', 'cp']:
-                    print('Iniciando copiadora de portapapeles... (Presione q+w+e para terminar)')
+                # Enviar al bot todo lo que se copie en el portapapeles
+                elif entrada in ['/clipboard', '/portapapeles', '/cp']:
+                    print('Iniciando copiadora de portapapeles... (Presione consecutivamente las letras \'q\', \'w\' y \'e\' para terminar)')
                     from pyperclip import copy, paste
                     from pynput import keyboard
                     bot.paperclip_on = True
@@ -275,14 +294,20 @@ def main():
                         content = paste()
                         if content:
                             send_message(bot, id, content)
-                            print_and_save('Portapapeles: '+content, bot.abs_file_backup, print_message=True, reset_input=False, new_line_before=False, new_line_after=True)
+                            print_and_save('Portapapeles: '+content,
+                                           bot.abs_file_backup,
+                                           print_message=True,
+                                           reset_input=False,
+                                           new_line_before=False,
+                                           new_line_after=True
+                                           )
                             copy('')
                     continue
                 if entrada:
                     send_message(bot, id, entrada)
         except KeyboardInterrupt:
             print('\nApagando el bot...')
-            bot.save_users()
+            bot.save_config()
     else:
         messages = argv[1:]
         bot = Bot(fast_init=True)
@@ -290,6 +315,7 @@ def main():
             print_and_save(message, bot.abs_file_backup, print_message=False)
             send_message(bot, bot.users['Raidel'], message)
         print('Done! (Sent %d messages)'%len(messages))
+    return 0
 
 if __name__ == '__main__':
     main()
