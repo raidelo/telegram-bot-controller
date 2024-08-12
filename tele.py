@@ -30,14 +30,19 @@ def get_section_without_defaults(parser:ConfigParser, section:str) -> dict:
         return data
     return {}
 
+class User:
+    def __init__(self, one_pair_dict:dict):
+        self.key = tuple(one_pair_dict.keys())[0]
+        self.value = tuple(one_pair_dict.values())[0]
+
 class Bot(TeleBot):
-    name_folder = 'TBC-data'
-    name_file_backup = 'messages-backup.txt'
-    name_file_config = 'tbc.ini'
-    script_route = '/'.join(__file__.split('\\')[:-1]) + '/'
-    abs_folder = script_route + name_folder + '/'
-    abs_file_backup = abs_folder + name_file_backup
-    abs_file_config = abs_folder + name_file_config
+    __name_folder = 'TBC-data'
+    __name_file_backup = 'messages-backup.txt'
+    __name_file_config = 'tbc.ini'
+    __script_route = '/'.join(__file__.split('\\')[:-1]) + '/'
+    __abs_folder = __script_route + __name_folder + '/'
+    __file_config = __abs_folder + __name_file_config
+    file_backup = __abs_folder + __name_file_backup
 
     def __init__(self, fast_init:bool=False):
         self.config = ConfigParser()
@@ -57,7 +62,7 @@ class Bot(TeleBot):
             self.start_time = time()
 
     def load_config(self) -> None:
-        c = self.config.read(self.abs_file_config)
+        c = self.config.read(self.__file_config)
         if len(c) > 0:
             convert_values_to_int = lambda dict_: dict(zip(dict_.keys(), map(int, dict_.values()))) # Converts all values of a dictionary to type int
             ################# GET USERS ################
@@ -82,7 +87,7 @@ class Bot(TeleBot):
                 default_user = self.config['DEFAULT_USER']
                 if len(default_user) > 1:            
                     raise Exception('Section DEFAULT_USER can only contain one value')
-                self.default_user = int(list(default_user.values())[0])
+                self.default_user = User(default_user)
             except KeyError as e:
                 e.args = ('There is no section {} in the config file. Create one and try again.'.format(e.args[0]),)
                 e.add_note('More info at README.md')
@@ -95,7 +100,7 @@ class Bot(TeleBot):
             exit(1)
 
     def save_config(self) -> None:
-        with open(self.abs_file_config, 'w') as config_file:
+        with open(self.__file_config, 'w') as config_file:
             self.config.write(config_file)
     
     def create_config_file(self):
@@ -118,7 +123,7 @@ class Bot(TeleBot):
         
         # IMPRIMR Y GUARDAR EL MENSAJE DEL USUARIO
         mensaje_del_usuario = '%s - %d: %s'%(name_of_user, message.chat.id, message.text)
-        print_and_save(mensaje_del_usuario, self.abs_file_backup, reset_input=False if message.text == '/quit' or self.paperclip_on else True, new_line_before=not self.paperclip_on, new_line_after=self.paperclip_on)
+        print_and_save(mensaje_del_usuario, self.file_backup, reset_input=False if message.text == '/quit' or self.paperclip_on else True, new_line_before=not self.paperclip_on, new_line_after=self.paperclip_on)
         
         # SECCIÓN DE RESPUESTA
         respuesta_bot, reply_markup = None, ReplyKeyboardRemove()
@@ -130,13 +135,13 @@ class Bot(TeleBot):
             respuesta_bot = 'Solo escríbeme, ya te contestaré cuando pueda...'
         elif message.text == '/quit':
             respuesta = 'Apagando el bot...'
-            print_and_save(respuesta, self.abs_file_backup, reset_input=False)
+            print_and_save(respuesta, self.file_backup, reset_input=False)
             self.save_config()
             kill(getpid(), SIGTERM)
             return 0
         elif message.text in ['/pc_control', '/internet']:
             respuesta_bot = 'No tienes acceso a esa opción.'
-            if message.chat.id in self.high:
+            if message.chat.id in self.high.keys():
                 botones = ReplyKeyboardMarkup()
                 if message.text == '/pc_control':
                     close_session_button, lock_button, restart_button, shutdown_button = KeyboardButton('Close Session'), KeyboardButton('Lock Session'), KeyboardButton('Restart'), KeyboardButton('Shutdown')
@@ -152,8 +157,8 @@ class Bot(TeleBot):
         if respuesta_bot:
             self.reply_to(message, respuesta_bot, reply_markup=reply_markup)
             mensaje_del_bot = 'Bot: %s'%respuesta_bot
-            print_and_save(mensaje_del_bot, self.abs_file_backup)
-        self.__next_message_is_cmd = True if (message.text == '/pc_control' or message.text == '/internet') and (message.chat.id in self.high) else False
+            print_and_save(mensaje_del_bot, self.file_backup)
+        self.__next_message_is_cmd = True if (message.text == '/pc_control' or message.text == '/internet') and (message.chat.id in self.high.keys()) else False
 
     def __check_special_message(self, message):
         options = {
@@ -168,55 +173,55 @@ class Bot(TeleBot):
         if message.text == 'Logout and Shutdown':
             text = 'Cerrando sesión y apagando PC ...'
             self.reply_to(message, text, reply_markup=ReplyKeyboardRemove())
-            print_and_save('Bot: %s'%text, self.abs_file_backup)
+            print_and_save('Bot: %s'%text, self.file_backup)
             system(options['Logout'][0])
             system(options['Shutdown'][0])
             return 0
         
-        cmd = options[message.text][0] if message.chat.id in self.high else ''
-        text = options[message.text][1] if message.chat.id in self.high else 'No tienes acceso a esa opción.'
+        cmd = options[message.text][0] if message.chat.id in self.high.keys() else ''
+        text = options[message.text][1] if message.chat.id in self.high.keys() else 'No tienes acceso a esa opción.'
         self.reply_to(message, text, reply_markup=ReplyKeyboardRemove())
-        print_and_save('Bot: %s'%text, self.abs_file_backup)
+        print_and_save('Bot: %s'%text, self.file_backup)
         system(cmd)
+
+    def send_message(self, id, message) -> int:
+        try:
+            print_and_save(message, self.file_backup, print_message=False)
+            super().send_message(id, message)
+            return 0
+        except ApiTelegramException as e:
+            if e.description == 'Forbidden: bot was blocked by the user':
+                print('Mensaje no enviado. Razón: El usuario -> %s <- ha bloqueado el bot.'%(self.users_[id]))
+            else:
+                print(e)
+        except RequestException:
+            print('Error al enviar el mensaje. Inténtelo denuevo.')
+        return 1
+
+    def match_user_by_first_letter(self, to_match) -> tuple[int, str]:
+        starts_with_that = lambda x: to_match.lower().startswith('/{} '.format(x.lower()))
+        in_aliases = any(map(starts_with_that, self.config['ALIASES'].keys()))
+        in_users = any(map(starts_with_that, self.config['USERS'].keys()))
+        if in_aliases or in_users:
+            thing = to_match.split()
+            initial, texto = thing[0], ' '.join(thing[1:])
+            section = 'USERS' if in_users else 'ALIASES'
+            return int(self.config[section][initial.strip('/ ')]), texto
+        else:
+            in_aliases = to_match.strip('/ ') in self.config['ALIASES'].keys()
+            in_users = to_match.strip('/ ') in self.config['USERS'].keys()
+            if in_users:
+                return int(self.config['USERS'][to_match.strip('/ ')]), ''
+            elif in_aliases:
+                return int(self.config['USERS'][self.config['ALIASES'][to_match.strip('/ ')]]), ''
+            else:
+                return 0, ''
 
 def listener_thread(bot):
     try:
         bot.infinity_polling(60)
     except Exception as e:
         print(e)
-
-def send_message(bot, id, message) -> int:
-    try:
-        print_and_save(message, bot.abs_file_backup, print_message=False)
-        bot.send_message(id, message)
-        return 0
-    except ApiTelegramException as e:
-        if e.description == 'Forbidden: bot was blocked by the user':
-            print('Mensaje no enviado. Razón: El usuario -> %s <- ha bloqueado el bot.'%(bot.users_[id]))
-        else:
-            print(e)
-    except RequestException:
-        print('Error al enviar el mensaje. Inténtelo denuevo.')
-    return 1
-
-def match_user_by_first_letter(bot, to_match) -> tuple[int, str]:
-    starts_with_that = lambda x: to_match.lower().startswith('/{} '.format(x.lower()))
-    in_aliases = any(map(starts_with_that, bot.config['ALIASES'].keys()))
-    in_users = any(map(starts_with_that, bot.config['USERS'].keys()))
-    if in_aliases or in_users:
-        thing = to_match.split()
-        initial, texto = thing[0], ' '.join(thing[1:])
-        section = 'USERS' if in_users else 'ALIASES'
-        return int(bot.config[section][initial.strip('/ ')]), texto
-    else:
-        in_aliases = to_match.strip('/ ') in bot.config['ALIASES'].keys()
-        in_users = to_match.strip('/ ') in bot.config['USERS'].keys()
-        if in_users:
-            return int(bot.config['USERS'][to_match.strip('/ ')]), ''
-        elif in_aliases:
-            return int(bot.config['USERS'][bot.config['ALIASES'][to_match.strip('/ ')]]), ''
-        else:
-            return 0, ''
 
 def main() -> int:
     if len(argv) == 1:
@@ -226,7 +231,7 @@ def main() -> int:
             raise e
         t1 = Thread(target=listener_thread, kwargs={'bot':bot}, daemon=True)
         t1.start()
-        last_id, id = bot.default_user, bot.default_user
+        last_id, id = bot.default_user.value, bot.default_user.value
         notify = lambda:print('Usuario cambiado a: %s'%bot.users_[id].capitalize())
         try:
             while True:
@@ -238,10 +243,10 @@ def main() -> int:
                 if entrada in ['/quit', '/q', 'q', '/exit']:
                     respuesta = 'Apagando el bot...'
                     bot.save_config()
-                    print_and_save(respuesta, bot.abs_file_backup, print_message=False)
+                    print_and_save(respuesta, bot.file_backup, print_message=False)
                     break
                 # Verificar si se desea cambiar de usuario
-                elif (int_str:=match_user_by_first_letter(bot, entrada))[0]:
+                elif (int_str:=bot.match_user_by_first_letter(entrada))[0]:
                     id, entrada = int_str
                 # Enviar el contenido de un archivo
                 elif entrada in ['/file', '/archivo']:
@@ -293,9 +298,9 @@ def main() -> int:
                         sleep(0.01)
                         content = paste()
                         if content:
-                            send_message(bot, id, content)
+                            bot.send_message(id, content)
                             print_and_save('Portapapeles: '+content,
-                                           bot.abs_file_backup,
+                                           bot.file_backup,
                                            print_message=True,
                                            reset_input=False,
                                            new_line_before=False,
@@ -304,7 +309,7 @@ def main() -> int:
                             copy('')
                     continue
                 if entrada:
-                    send_message(bot, id, entrada)
+                    bot.send_message(id, entrada)
         except KeyboardInterrupt:
             print('\nApagando el bot...')
             bot.save_config()
@@ -312,8 +317,8 @@ def main() -> int:
         messages = argv[1:]
         bot = Bot(fast_init=True)
         for message in messages:
-            print_and_save(message, bot.abs_file_backup, print_message=False)
-            send_message(bot, bot.users['Raidel'], message)
+            print_and_save(message, bot.file_backup, print_message=False)
+            bot.send_message(bot.default_user.value, message)
         print('Done! (Sent %d messages)'%len(messages))
     return 0
 
