@@ -67,7 +67,7 @@ class Bot(TeleBot):
                 BotCommand("internet", "Herramientas de internet."),
                 BotCommand("help", "Información sobre como usar el bot."),
                 ], timeout=10)
-            self.paperclip_on, self.unknown_counter = False, 0
+            self.paperclip_on = False
             self.start_time = time()
 
     def set_my_commands(self, commands: list[BotCommand], scope: BotCommandScope | None = None, language_code: str | None = None, timeout:int=15) -> bool:
@@ -135,16 +135,19 @@ class Bot(TeleBot):
 
     def __text_message(self, message) -> None:
         # SECCIÓN DE MENSAJE ENTRANTE
-        if message.json["from"]["id"] in self.users.keys():   # Si es un usuario conocido, obtener su nombre.
-            name_of_user = self.users[message.json["from"]["id"]]
-        else:                                                 # Si no, asignarle el nombre "UNKNOWN_(número) - (nombre de usuario)" y añadirlo a los usuarios conocidos
-            self.unknown_counter += 1
-            name_of_user = message.json["from"]["first_name"]
-            name_of_user = "UNKNOWN_%d - %s"%(self.unknown_counter, name_of_user)
-            self.add_user_to_userlist(name_of_user, message.json["from"]["id"])
-        
+        from_ = ""
+        user_name, user_id = message.json["from"]["first_name"], message.json["from"]["id"]
+
+        if user_id in self.users.keys():                      # Si es un usuario conocido, obtener su nombre.
+            user_name = self.users[user_id]
+        else:                                                 # Si no, asignarle el nombre "UNKNOWN_%(nombre de usuario)s_%(id)d" y añadirlo a los usuarios conocidos
+            user_name = "UNKNOWN_%s_%d"%(user_name, user_id)
+            self.add_user_to_userlist(user_name, user_id)
+
+        from_ += user_name
+
         # IMPRIMR Y GUARDAR EL MENSAJE DEL USUARIO
-        mensaje_del_usuario = "%s - %d: %s"%(name_of_user, message.json["from"]["id"], message.json["text"])
+        mensaje_del_usuario = "[%s]: %s"%(from_, message.json["text"])
         print_and_save(mensaje_del_usuario, self.file_backup, reset_input=False if message.json["text"] == "/quit" or self.paperclip_on else True, new_line_before=not self.paperclip_on, new_line_after=self.paperclip_on)
 
         if self.__next_message_is_cmd and (message.json["text"] in ["Close Session",
@@ -168,7 +171,7 @@ class Bot(TeleBot):
             respuesta_bot = "Solo escríbeme, ya te contestaré cuando pueda..."
         elif message.json["text"] in ["/pc_control", "/internet"]:
             respuesta_bot = "No tienes acceso a esa opción."
-            if message.json["from"]["id"] in self.high.values():
+            if user_id in self.high.values():
                 botones = ReplyKeyboardMarkup()
                 if message.json["text"] == "/pc_control":
                     botones.add(
