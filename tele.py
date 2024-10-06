@@ -89,6 +89,11 @@ class Bot(TeleBot):
                 self.users = invert_dict_items(convert_values_to_int(self.config["USERS"]))
             except KeyError:
                 self.users = {}
+            ################# GET GROUPS ################
+            try:
+                self.groups = invert_dict_items(convert_values_to_int(self.config['GROUPS']))
+            except KeyError:
+                self.groups = {}
             ########## GET HIGH PRIVILEGE USER #########
             try:
                 self.high = convert_values_to_int(self.config["HIGH"])
@@ -133,9 +138,22 @@ class Bot(TeleBot):
         self.users[user_id] = user_name
         self.config["USERS"][user_name] = str(user_id)
 
+    def add_group_to_grouplist(self, group_name, group_id) -> None:
+        self.groups[group_id] = group_name
+        self.config["GROUPS"][group_name] = str(group_id)
+
     def __text_message(self, message) -> None:
         # SECCIÓN DE MENSAJE ENTRANTE
         from_ = ""
+        if message.json["chat"]["type"] == "group":                # Si es un mensaje que proviene de un grupo.
+            group_name, group_id = message.json["chat"]["title"], message.json["chat"]["id"]
+
+            if message.json["chat"]["id"] in self.groups.keys():   # Si es un grupo conocido, obtener su nombre.
+                group_name = self.groups[group_id]
+
+            self.add_group_to_grouplist(group_name, group_id)
+            from_ += group_name + "/"
+
         user_name, user_id = message.json["from"]["first_name"], message.json["from"]["id"]
 
         if user_id in self.users.keys():                      # Si es un usuario conocido, obtener su nombre.
