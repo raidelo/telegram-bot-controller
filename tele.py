@@ -54,6 +54,7 @@ class Bot(TeleBot):
 
     def __init__(self, fast_init:bool=False):
         self.config = ConfigParser()
+        self.config.optionxform = lambda x: x
         self.load_config()
         super().__init__(self.apikey)
         if not fast_init: # Only meant for extended use of the bot.
