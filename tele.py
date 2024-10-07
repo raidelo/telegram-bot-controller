@@ -2,8 +2,9 @@ from time import time, sleep
 from threading import Thread
 from signal import SIGTERM
 from os import makedirs, kill, system, getpid
+import configparser
 from configparser import ConfigParser
-from sys import argv
+from sys import argv, stderr
 from telebot import TeleBot
 from telebot.apihelper import ApiTelegramException, _make_request, _convert_list_json_serializable
 from telebot.types import BotCommand, BotCommandScope, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
@@ -25,18 +26,30 @@ def print_and_save(message, file_route, print_message=True, reset_input=True, ne
     file.close()
 
 def get_section_without_defaults(parser:ConfigParser, section:str) -> dict:
+    # Extrae las opciones de una sección sin incluir los valores de la sección por defecto del 'ConfigParser'
     if parser.has_section(section):
         data = {item[0]:item[1] for item in parser.items(section) if item not in parser.items(parser.default_section) and not item[0].startswith("$")}
         return data
     return {}
 
 def invert_dict_items(dict_like:dict) -> dict:
-    # Inverts keys to values and vice-versa
+    # Invierte las claves a los valores y viceversa
     return {value:key for key, value in dict_like.items()}
 
 def convert_values_to_int(dict_like:dict) -> dict:
-    # Converts all values of a dictionary to type int
+    # Convierte todos los valores de un diccionario al tipo 'int'
     return dict(zip(dict_like.keys(), map(int, dict_like.values())))
+
+class Colors:
+    BLACK   = "\x1b[30m"
+    RED     = "\x1b[31m"
+    GREEN   = "\x1b[32m"
+    YELLOW  = "\x1b[33m"
+    BLUE    = "\x1b[34m"
+    MAGENTA = "\x1b[35m"
+    CYAN    = "\x1b[36m"
+    WHITE   = "\x1b[37m"
+    RESET   = "\x1b[39m"
 
 class User:
     def __init__(self, one_pair_dict:dict):
@@ -52,12 +65,12 @@ class Bot(TeleBot):
     __file_config = __abs_folder + __name_file_config
     file_backup = __abs_folder + __name_file_backup
 
-    def __init__(self, fast_init:bool=False):
+    def __init__(self, fast_init:bool=False, timeout:int=10):
         self.config = ConfigParser()
         self.config.optionxform = lambda x: x
         self.load_config()
         super().__init__(self.apikey)
-        if not fast_init: # Only meant for extended use of the bot.
+        if not fast_init: # Only meant for extended use of the bot. O sea, no pasándole argumentos.
             self.__next_message_is_cmd = False
             self.register_message_handler(self.__text_message, content_types=["text"])
             self.set_my_commands([
@@ -66,7 +79,7 @@ class Bot(TeleBot):
                 BotCommand("pc_control", "Algunos controles del PC."),
                 BotCommand("internet", "Herramientas de internet."),
                 BotCommand("help", "Información sobre como usar el bot."),
-                ], timeout=10)
+                ], timeout=timeout)
             self.paperclip_on = False
             self.start_time = time()
 
@@ -82,41 +95,77 @@ class Bot(TeleBot):
         return _make_request(self.apikey, method_url, params=params, method="post")
 
     def load_config(self) -> None:
-        c = self.config.read(self.__file_config)
+        try:
+            c = self.config.read(self.__file_config)
+        except configparser.DuplicateSectionError as e:
+            stderr.write("%serror%s [línea: %d]: sección '%s' duplicada en el archivo de configuración" % (Colors.RED, Colors.RESET, e.lineno, e.section))
+            exit(1)
+        except configparser.DuplicateOptionError as e:
+            stderr.write("%serror%s [línea: %d]: opción '%s' duplicada en el archivo de configuración" % (Colors.RED, Colors.RESET, e.lineno, e.args[1]))
+            exit(1)
+        except (configparser.Error, configparser.MissingSectionHeaderError):
+            stderr.write("%serror%s: error al cargar el archivo de configuración\nmás información en el archivo README.md" % (Colors.RED, Colors.RESET))
+            exit(1)
+
         if len(c) > 0:
             ################# GET USERS ################
+
             try:
                 self.users = invert_dict_items(convert_values_to_int(self.config["USERS"]))
             except KeyError:
                 self.users = {}
+
             ################# GET GROUPS ################
+
             try:
                 self.groups = invert_dict_items(convert_values_to_int(self.config['GROUPS']))
             except KeyError:
                 self.groups = {}
+
             ########## GET HIGH PRIVILEGE USER #########
+
             try:
                 self.high = convert_values_to_int(self.config["HIGH"])
             except KeyError:
                 self.high = {}
-            ################ GET ALIASES ###############    
+
+            ################ GET ALIASES ###############
+
             try:
                 self.aliases = self.config["ALIASES"]
             except KeyError:
                 self.aliases = {}
+
             try:
-            ################ GET BOT API ###############
-                self.apikey = self.config["BOT"]["apikey"]
-            ############# GET DEFAULT USER #############
-                default_user = self.config["DEFAULT_USER"]
-                if len(default_user) > 1:            
-                    raise Exception("Section DEFAULT_USER can only contain one value")
-                self.default_user = User(default_user)
+
+                ################ GET BOT API ###############
+
+                bot_section = self.config["BOT"]
+
+                ############# GET DEFAULT_TO VALUE #############
+
+                default_user = self.config["DEFAULT_TO"]
+
             except KeyError as e:
-                e.args = ("There is no section {} in the config file. Create one and try again.".format(e.args[0]),)
-                e.add_note("More info at README.md")
-                raise e
-            ############################################
+                stderr.write("%serror%s: la sección '%s' no se encuentra en el archivo de configuración\nmás información en el archivo README.md" % (Colors.RED, Colors.RESET, e.args[0]))
+                exit(1)
+
+            for section in (bot_section, default_user):
+                if len(section) == 0:
+                    stderr.write("%serror%s: sección '%s' vacía" % (Colors.RED, Colors.RESET, section.name))
+                    exit(1)
+                elif len(section) > 1:
+                    stderr.write("%serror%s: la sección '%s' debe contener un solo par 'clave = valor'" % (Colors.RED, Colors.RESET, section.name))
+                    exit(1)
+
+            self.apikey = bot_section.get("apikey")
+
+            if self.apikey == None:
+                stderr.write("%serror%s: la sección 'BOT' debe contener una opción llamada 'apikey' conteniendo la API del Bot de Telegram" % (Colors.RED, Colors.RESET))
+                exit(1)
+
+            self.default_user = User(default_user)
+
         else:
             e = input("El archivo de configuración no existe! Desea crear uno? (Y/N) ")
             if e.lower().strip() == "y":
@@ -126,9 +175,10 @@ class Bot(TeleBot):
     def save_config(self) -> None:
         with open(self.__file_config, "w") as config_file:
             self.config.write(config_file)
-    
+
     def create_config_file(self):
-        raise Exception("Not implemented!")
+        stderr.write("%serror%s: función no implementada todavía" % (Colors.RED, Colors.RESET))
+        exit(1)
 
     @property
     def online_time(self) -> float:
@@ -252,11 +302,11 @@ class Bot(TeleBot):
             return 0
         except ApiTelegramException as e:
             if e.description == "Forbidden: bot was blocked by the user":
-                print("Mensaje no enviado. Razón: El usuario -> %s <- ha bloqueado el bot."%(self.users[args[0]].capitalize()))
+                stderr.write("%serror%s: mensaje no enviado. Razón: El usuario '%s' ha bloqueado el bot."%(Colors.RED, Colors.RESET, self.users[args[0]]))
             else:
-                raise e
+                stderr.write("%serror%s: %s" % (Colors.RED, Colors.RESET, e.description))
         except RequestException:
-            print("Error al enviar el mensaje. Inténtelo denuevo.")
+            stderr.write("%serror%s: no se pudo enviar el mensaje, compruebe su conexión a internet o cortafuegos" % (Colors.RED, Colors.RESET))
         return 1
 
     def match_user_by_first_letter(self, to_match) -> tuple[int, str]:
@@ -278,6 +328,9 @@ class Bot(TeleBot):
             else:
                 return 0, ""
 
+    def __del__(self):
+        self.save_config()
+
 def listener_thread(bot):
     try:
         bot.infinity_polling(60)
@@ -287,9 +340,9 @@ def listener_thread(bot):
 def main() -> int:
     if len(argv) == 1:
         try:
-            bot = Bot()
-        except RequestException as e:
-            print("error: compruebe su conexión a internet o cortafuegos")
+            bot = Bot(timeout=5)
+        except RequestException:
+            stderr.write("%serror%s: compruebe su conexión a internet o cortafuegos" % (Colors.RED, Colors.RESET))
             exit(1)
         t1 = Thread(target=listener_thread, kwargs={"bot":bot}, daemon=True)
         t1.start()
@@ -333,7 +386,7 @@ def main() -> int:
                     continue
                 # Enviar al bot todo lo que se copie en el portapapeles
                 elif entrada in ["/clipboard", "/portapapeles", "/cp"]:
-                    print("Iniciando copiadora de portapapeles... (Presione consecutivamente las letras \"q\", \"w\" y \"e\" para terminar)")
+                    print("Iniciando copiadora de portapapeles... (Presione consecutivamente las letras 'q', 'w' y 'e' para terminar)")
                     from pyperclip import copy, paste
                     from pynput import keyboard
                     bot.paperclip_on = True
@@ -378,12 +431,15 @@ def main() -> int:
     else:
         messages = argv[1:]
         try:
-            bot = Bot(fast_init=True)
-        except RequestException as e:
-            raise e
+            bot = Bot(fast_init=True, timeout=5)
+        except RequestException:
+            stderr.write("%serror%s: compruebe su conexión a internet o cortafuegos" % (Colors.RED, Colors.RESET))
+            exit(1)
         for message in messages:
             print_and_save(message, bot.file_backup, print_message=False)
-            bot.send_message(bot.default_user.value, message)
+            status_code = bot.send_message(bot.default_user.value, message)
+            if status_code != 0:
+                exit(status_code)
         print("Done! (Sent %d messages)"%len(messages))
     return 0
 
