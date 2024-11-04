@@ -1,7 +1,7 @@
 from time import time, sleep
 from threading import Thread
 from signal import SIGTERM
-from os import makedirs, kill, system, getpid
+from os import makedirs, kill, system, getpid, path
 import configparser
 from configparser import ConfigParser
 from sys import argv, stderr
@@ -57,13 +57,12 @@ class User:
         self.value = tuple(one_pair_dict.values())[0]
 
 class Bot(TeleBot):
-    __name_folder = "TBC-data"
-    __name_file_backup = "messages-backup.txt"
-    __name_file_config = "tbc.ini"
-    __script_route = "/".join(__file__.split("\\")[:-1]) + "/"
-    __abs_folder = __script_route + __name_folder + "/"
-    __file_config = __abs_folder + __name_file_config
-    file_backup = __abs_folder + __name_file_backup
+    __NAME_DATA_FOLDER = "TBC-data"
+    __NAME_CONFIG_FILE = "tbc.ini"
+    __NAME_BACKUP_FILE = "messages-backup.txt"
+    __ABS_DATA_FOLDER = "{}/{}/".format(path.dirname(__file__), __NAME_DATA_FOLDER)
+    __CONFIG_FILE = __ABS_DATA_FOLDER + __NAME_CONFIG_FILE
+    backup_file = __ABS_DATA_FOLDER + __NAME_BACKUP_FILE
 
     def __init__(self, fast_init:bool=False, timeout:int=10):
         self.config = ConfigParser()
@@ -96,7 +95,7 @@ class Bot(TeleBot):
 
     def load_config(self) -> None:
         try:
-            c = self.config.read(self.__file_config)
+            c = self.config.read(self.__CONFIG_FILE)
         except configparser.DuplicateSectionError as e:
             stderr.write("%serror%s [línea: %d]: sección '%s' duplicada en el archivo de configuración" % (Colors.RED, Colors.RESET, e.lineno, e.section))
             exit(1)
@@ -173,7 +172,7 @@ class Bot(TeleBot):
             exit(1)
 
     def save_config(self) -> None:
-        with open(self.__file_config, "w") as config_file:
+        with open(self.__CONFIG_FILE, "w") as config_file:
             self.config.write(config_file)
 
     def create_config_file(self):
@@ -216,7 +215,7 @@ class Bot(TeleBot):
 
         # IMPRIMR Y GUARDAR EL MENSAJE DEL USUARIO
         mensaje_del_usuario = "[%s]: %s"%(from_, message.json["text"])
-        print_and_save(mensaje_del_usuario, self.file_backup, reset_input=False if message.json["text"] == "/quit" or self.paperclip_on else True, new_line_before=not self.paperclip_on, new_line_after=self.paperclip_on)
+        print_and_save(mensaje_del_usuario, self.backup_file, reset_input=False if message.json["text"] == "/quit" or self.paperclip_on else True, new_line_before=not self.paperclip_on, new_line_after=self.paperclip_on)
 
         if self.__next_message_is_cmd and (message.json["text"] in ["Close Session",
                                                             "Lock Session",
@@ -259,14 +258,14 @@ class Bot(TeleBot):
                 self.__next_message_is_cmd = True
         elif message.json["text"] == "/quit":
             respuesta = "Apagando el bot..."
-            print_and_save(respuesta, self.file_backup, reset_input=False)
+            print_and_save(respuesta, self.backup_file, reset_input=False)
             self.save_config()
             kill(getpid(), SIGTERM)
             return 0
         if respuesta_bot:
             self.reply_to(message, respuesta_bot, reply_markup=reply_markup)
             mensaje_del_bot = "Bot: %s"%respuesta_bot
-            print_and_save(mensaje_del_bot, self.file_backup)
+            print_and_save(mensaje_del_bot, self.backup_file)
 
     def __check_special_message(self, message) -> None:
         options = {
@@ -281,7 +280,7 @@ class Bot(TeleBot):
             if message.json["text"] == "Logout and Shutdown":
                 text = "Cerrando sesión y apagando PC ..."
                 self.reply_to(message, text, reply_markup=ReplyKeyboardRemove())
-                print_and_save("Bot: %s"%text, self.file_backup)
+                print_and_save("Bot: %s"%text, self.backup_file)
                 system(options["Logout"][0])
                 system(options["Shutdown"][0])
                 return 0
@@ -292,12 +291,12 @@ class Bot(TeleBot):
             text = "No tienes acceso a esa opción."
 
         self.reply_to(message, text, reply_markup=ReplyKeyboardRemove())
-        print_and_save("Bot: %s"%text, self.file_backup)
+        print_and_save("Bot: %s"%text, self.backup_file)
         system(cmd)
 
     def send_message(self, *args, **kwargs) -> int:
         try:
-            print_and_save(args[1], self.file_backup, print_message=False)
+            print_and_save(args[1], self.backup_file, print_message=False)
             super().send_message(*args, **kwargs)
             return 0
         except ApiTelegramException as e:
@@ -358,7 +357,7 @@ def main() -> int:
                 if entrada in ["/quit", "/q", "q", "/exit"]:
                     respuesta = "Apagando el bot..."
                     bot.save_config()
-                    print_and_save(respuesta, bot.file_backup, print_message=False)
+                    print_and_save(respuesta, bot.backup_file, print_message=False)
                     break
                 # Verificar si se desea cambiar de usuario
                 elif (int_str:=bot.match_user_by_first_letter(entrada))[0]:
@@ -415,7 +414,7 @@ def main() -> int:
                         if content:
                             bot.send_message(id, content)
                             print_and_save("Portapapeles: "+content,
-                                           bot.file_backup,
+                                           bot.backup_file,
                                            print_message=True,
                                            reset_input=False,
                                            new_line_before=False,
@@ -436,7 +435,7 @@ def main() -> int:
             stderr.write("%serror%s: compruebe su conexión a internet o cortafuegos" % (Colors.RED, Colors.RESET))
             exit(1)
         for message in messages:
-            print_and_save(message, bot.file_backup, print_message=False)
+            print_and_save(message, bot.backup_file, print_message=False)
             status_code = bot.send_message(bot.default_user.value, message)
             if status_code != 0:
                 exit(status_code)
