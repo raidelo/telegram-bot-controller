@@ -10,21 +10,6 @@ from telebot.apihelper import ApiTelegramException, _make_request, _convert_list
 from telebot.types import BotCommand, BotCommandScope, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 from requests import RequestException
 
-def print_and_save(message, file_route, print_message=True, reset_input=True, new_line_before=True, new_line_after=False):
-    file_route =  file_route if "\\" not in file_route else file_route.replace("\\", "/")
-    folder = "/".join(file_route.split("/")[:-1])
-    makedirs(folder, exist_ok=True)
-    print("%s%s%s%s"%("\n" if new_line_before else "",
-                    message,
-                    "\n-> " if reset_input else "", 
-                    "\n" if new_line_after else ""), end="", flush=True) if print_message else None
-    try:
-        file =  open(file_route, "a", encoding="utf-8")
-    except FileNotFoundError:
-        file =  open(file_route, "w", encoding="utf-8")
-    file.write(message + "\n")
-    file.close()
-
 def get_section_without_defaults(parser:ConfigParser, section:str) -> dict:
     # Extrae las opciones de una sección sin incluir los valores de la sección por defecto del 'ConfigParser'
     if parser.has_section(section):
@@ -62,7 +47,7 @@ class Bot(TeleBot):
     __NAME_BACKUP_FILE = "messages-backup.txt"
     __ABS_DATA_FOLDER = "{}/{}/".format(path.dirname(__file__), __NAME_DATA_FOLDER)
     __CONFIG_FILE = __ABS_DATA_FOLDER + __NAME_CONFIG_FILE
-    backup_file = __ABS_DATA_FOLDER + __NAME_BACKUP_FILE
+    __BACKUP_FILE = __ABS_DATA_FOLDER + __NAME_BACKUP_FILE
 
     def __init__(self, fast_init:bool=False, timeout:int=10):
         self.config = ConfigParser()
@@ -215,7 +200,7 @@ class Bot(TeleBot):
 
         # IMPRIMR Y GUARDAR EL MENSAJE DEL USUARIO
         mensaje_del_usuario = "[%s]: %s"%(from_, message.json["text"])
-        print_and_save(mensaje_del_usuario, self.backup_file, reset_input=False if message.json["text"] == "/quit" or self.paperclip_on else True, new_line_before=not self.paperclip_on, new_line_after=self.paperclip_on)
+        self.print_and_save(mensaje_del_usuario, reset_input=False if message.json["text"] == "/quit" or self.paperclip_on else True, new_line_before=not self.paperclip_on, new_line_after=self.paperclip_on)
 
         if self.__next_message_is_cmd and (message.json["text"] in ["Close Session",
                                                             "Lock Session",
@@ -258,14 +243,14 @@ class Bot(TeleBot):
                 self.__next_message_is_cmd = True
         elif message.json["text"] == "/quit":
             respuesta = "Apagando el bot..."
-            print_and_save(respuesta, self.backup_file, reset_input=False)
+            self.print_and_save(respuesta, reset_input=False)
             self.save_config()
             kill(getpid(), SIGTERM)
             return 0
         if respuesta_bot:
             self.reply_to(message, respuesta_bot, reply_markup=reply_markup)
             mensaje_del_bot = "Bot: %s"%respuesta_bot
-            print_and_save(mensaje_del_bot, self.backup_file)
+            self.print_and_save(mensaje_del_bot)
 
     def __check_special_message(self, message) -> None:
         options = {
@@ -280,7 +265,7 @@ class Bot(TeleBot):
             if message.json["text"] == "Logout and Shutdown":
                 text = "Cerrando sesión y apagando PC ..."
                 self.reply_to(message, text, reply_markup=ReplyKeyboardRemove())
-                print_and_save("Bot: %s"%text, self.backup_file)
+                self.print_and_save("Bot: %s"%text)
                 system(options["Logout"][0])
                 system(options["Shutdown"][0])
                 return 0
@@ -291,12 +276,12 @@ class Bot(TeleBot):
             text = "No tienes acceso a esa opción."
 
         self.reply_to(message, text, reply_markup=ReplyKeyboardRemove())
-        print_and_save("Bot: %s"%text, self.backup_file)
+        self.print_and_save("Bot: %s"%text)
         system(cmd)
 
     def send_message(self, *args, **kwargs) -> int:
         try:
-            print_and_save(args[1], self.backup_file, print_message=False)
+            self.print_and_save(args[1], print_message=False)
             super().send_message(*args, **kwargs)
             return 0
         except ApiTelegramException as e:
@@ -326,6 +311,21 @@ class Bot(TeleBot):
                 return int(self.config["USERS"][self.config["ALIASES"][to_match.strip("/ ")]]), ""
             else:
                 return 0, ""
+
+    def print_and_save(self, message, print_message=True, reset_input=True, new_line_before=True, new_line_after=False):
+        self.__BACKUP_FILE =  self.__BACKUP_FILE if "\\" not in self.__BACKUP_FILE else self.__BACKUP_FILE.replace("\\", "/")
+        folder = "/".join(self.__BACKUP_FILE.split("/")[:-1])
+        makedirs(folder, exist_ok=True)
+        print("%s%s%s%s"%("\n" if new_line_before else "",
+                        message,
+                        "\n-> " if reset_input else "", 
+                        "\n" if new_line_after else ""), end="", flush=True) if print_message else None
+        try:
+            file =  open(self.__BACKUP_FILE, "a", encoding="utf-8")
+        except FileNotFoundError:
+            file =  open(self.__BACKUP_FILE, "w", encoding="utf-8")
+        file.write(message + "\n")
+        file.close()
 
     def __del__(self):
         self.save_config()
@@ -357,7 +357,7 @@ def main() -> int:
                 if entrada in ["/quit", "/q", "q", "/exit"]:
                     respuesta = "Apagando el bot..."
                     bot.save_config()
-                    print_and_save(respuesta, bot.backup_file, print_message=False)
+                    bot.print_and_save(respuesta, print_message=False)
                     break
                 # Verificar si se desea cambiar de usuario
                 elif (int_str:=bot.match_user_by_first_letter(entrada))[0]:
@@ -413,8 +413,7 @@ def main() -> int:
                         content = paste()
                         if content:
                             bot.send_message(id, content)
-                            print_and_save("Portapapeles: "+content,
-                                           bot.backup_file,
+                            bot.print_and_save("Portapapeles: "+content,
                                            print_message=True,
                                            reset_input=False,
                                            new_line_before=False,
@@ -435,7 +434,7 @@ def main() -> int:
             stderr.write("%serror%s: compruebe su conexión a internet o cortafuegos" % (Colors.RED, Colors.RESET))
             exit(1)
         for message in messages:
-            print_and_save(message, bot.backup_file, print_message=False)
+            bot.print_and_save(message, print_message=False)
             status_code = bot.send_message(bot.default_user.value, message)
             if status_code != 0:
                 exit(status_code)
